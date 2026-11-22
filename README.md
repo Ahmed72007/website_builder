@@ -1,129 +1,150 @@
 # Website Builder
 
 A multi-tenant, no-code website builder: drag-and-drop sections, a theme system
-(tokens → CSS variables), multi-page sites, publish/rollback with immutable
-snapshots, custom domains, and a public renderer that serves published sites by
-host or path.
+(tokens → CSS variables), multi-page sites, a publish phase with immutable
+versions and rollback, custom domains, form inbox, and a public renderer that
+serves published sites by host or path.
 
-Built from the *Dynamic Website Builder — Project Plan*. MVP scope from the plan
-(pages, section library, headers/footers, themes, responsive overrides, publish,
-versions, contact forms, super admin) is implemented in a deliberately small
-form; see "Plan coverage" below.
+Built from the *Dynamic Website Builder — Project Plan*.
 
 ## Quick start
 
-Requires Node 22+. No install is needed for the JSON store.
+Requires Node 20+. No install is needed for the JSON store.
 
 ```bash
 npm start                      # http://localhost:3000
-npm test                       # API + renderer tests (JSON store)
+npm test                       # 22 API, renderer and feature tests
 ```
 
-Open http://localhost:3000, sign up, create a site from a template, edit, publish,
-then view it at http://localhost:3000/s/<subdomain>/.
+Open http://localhost:3000, sign up, create a site from a template, edit it,
+publish, then view it at http://localhost:3000/s/<subdomain>/.
 
-### Using MongoDB Atlas
+### MongoDB Atlas
 
-Set the connection string in your own environment (do not commit it):
+Set the connection string in your own environment. Do not commit it.
 
 ```bash
 export MONGODB_URI='mongodb+srv://<user>:<password>@<cluster>.mongodb.net/'
-export MONGODB_DB=website_builder        # optional, default: website_builder
+export MONGODB_DB=website_builder        # optional
 npm start
 ```
 
-When `MONGODB_URI` is set the server uses MongoDB and creates the indexes from the
-plan's data model on startup. Without it, data goes to `data/db.json`.
+With `MONGODB_URI` set, the server uses MongoDB and creates the plan's indexes on
+startup. Without it, data goes to `data/db.json`.
+
+Check the connection at `GET /api/v1/health`. It reports the store kind and latency.
 
 ## Environment variables
 
-| Variable        | Purpose                                                        |
-|-----------------|----------------------------------------------------------------|
-| `PORT`          | HTTP port (default 3000)                                       |
-| `MONGODB_URI`   | Atlas connection string; enables the MongoDB store             |
-| `MONGODB_DB`    | Database name (default `website_builder`)                      |
-| `BASE_DOMAIN`   | e.g. `yourbuilder.com`; sites served at `<sub>.<BASE_DOMAIN>`  |
-| `ADMIN_EMAILS`  | Comma-separated super-admin emails (`/api/v1/admin/tenants`)   |
+| Variable       | Purpose                                                       |
+|----------------|---------------------------------------------------------------|
+| `PORT`         | HTTP port (default 3000)                                      |
+| `MONGODB_URI`  | Atlas connection string; enables the MongoDB store (required on Vercel) |
+| `MONGODB_DB`   | Database name (default `website_builder`)                     |
+| `BASE_DOMAIN`  | e.g. `yourbuilder.com`; sites are served at `<sub>.<BASE_DOMAIN>` |
+| `ADMIN_EMAILS` | Comma-separated super-admin emails (`/api/v1/admin/tenants`)  |
 
 ## Layout
 
 ```
-public/            editor SPA (index.html, editor.js, editor.css)
-src/shared/        code used by BOTH editor and renderer
-  registry.js      section registry: schema, defaults, variants, render, sanitizers
-  theme.js         presets, token sanitizing, CSS compiler, WCAG contrast checks
-  render.js        full-page HTML, nav from page tree, SEO, sitemap, robots
+api/index.js          Vercel serverless entry (wraps the same app)
+vercel.json           rewrites every path to the handler; bundles public/ and src/shared/
+public/               editor SPA (index.html, editor.js, editor.css)
+src/shared/           code used by BOTH editor and public site
+  registry.js         section registry: schema, defaults, variants, render, sanitizers
+  theme.js            presets, token sanitizing, CSS compiler, WCAG contrast checks
+  render.js           full-page HTML, nav from page tree, SEO, sitemap, robots
 src/server/
-  server.js        REST API (/api/v1), public renderer, static hosting
-  store.js         MongoStore (Atlas) and JsonStore behind one interface
-test/app.test.js   unit + end-to-end tests
+  server.js           REST API (/api/v1), public renderer, static hosting
+  store.js            MongoStore (Atlas) and JsonStore behind one interface
+test/                 app.test.js, features.test.js
 ```
+
+## Using the editor
+
+- **Pages**: add, duplicate, rename, reorder (↑ ↓), nest (Indent / Outdent), hide
+  from menu, set the home page, and set SEO title, description and noindex.
+- **Sections**: add from the library, drag to reorder in the layers list, duplicate,
+  delete, and show or hide per breakpoint. Edit content and style in the Edit tab.
+- **Click to select** a section directly in the preview.
+- **Theme**: presets, seven colors, heading and body fonts, radius, spacing, button
+  shape, dark mode. Contrast warnings appear as you edit.
+- **Undo / redo** with Ctrl+Z and Ctrl+Shift+Z. **Save now** with Ctrl+S. Edits
+  autosave about 0.5 s after you stop typing.
+- **Publish** tab: readiness checklist, optional version note, publish, unpublish,
+  version history, and one-click restore. The top bar shows Draft, Unpublished
+  changes, or Live · vN.
+- **Site** tab: rename, language, duplicate site, custom domains with DNS TXT
+  verification, team invites (editor, admin, viewer), the form-submission inbox
+  (read and delete), and site deletion for owners.
+
+## Publish phase
+
+1. Validation runs first: at least one page, one home page, a header and a footer.
+   Failures are listed and nothing is written.
+2. The draft is frozen into an immutable `siteVersions` snapshot with a number,
+   timestamp, note, and the draft version it came from.
+3. The site's `publishedVersionId` moves to that snapshot. Public pages use an
+   ETag, and a new publish produces new cache keys, so visitors get fresh pages.
+4. Unpublish clears the live pointer. Restore points it at an older snapshot. The
+   draft is never changed by restore.
+
+Unpublished edits never reach visitors, because the renderer reads only snapshots.
 
 ## How it works
 
-- **Section registry.** Each section type declares a `schema` (the editor's
-  inspector is generated from it), `defaultProps`, `variants`, and `render`. The
-  server validates every write against the same schema, and the renderer uses the
-  same `render`, so the editor preview matches the live site.
-- **Theme.** Sections only reference tokens (`var(--color-primary)`), so changing
-  one color or preset restyles the whole site. Contrast warnings are computed
-  against WCAG AA.
-- **Drafts and publish.** The editor autosaves the draft (`PUT /sites/:id/draft`,
-  with optimistic locking on `version`). Publish validates the draft (home page,
-  header, footer present), writes an immutable `siteVersions` snapshot, and points
-  `publishedVersionId` at it. Rollback just moves that pointer. The renderer only
-  reads snapshots, so unpublished edits never reach visitors.
-- **Tenancy.** Every site belongs to a workspace; every site route checks the
+- **Section registry.** Each type declares `schema` (the editor's inspector is
+  generated from it), `defaults`, `variants`, and `render`. The server validates
+  every write against the same schema, and the renderer uses the same `render`,
+  so the preview matches the live site.
+- **Fast preview.** The preview endpoint renders the unsaved draft on the server
+  without a database write. The iframe is swapped only when the HTML changes.
+- **Optimistic locking.** Autosave sends `version`. A stale tab gets a 409 and is
+  told to reload, so it can't overwrite another tab's work.
+- **Tenancy.** Every site belongs to a workspace. Every site route checks the
   caller's membership and role (owner > admin > editor > viewer).
-- **Hosting.** Requests whose host matches `*.BASE_DOMAIN` or a verified custom
-  domain are rendered directly. Locally, `/s/<subdomain>/…` is used.
-- **Cache.** Rendered HTML is cached per snapshot id, so a new publish
-  automatically revalidates. Responses also carry `s-maxage` for a CDN.
+- **Hosting.** Requests for `*.BASE_DOMAIN` or a verified custom domain render
+  directly. Locally, `/s/<subdomain>/` is used.
+- **Speed.** One round trip loads the editor. Sites lists omit theme payloads.
+  Version lists omit snapshots. Rendered HTML is cached per snapshot. Responses
+  return ETags and 304s, and assets revalidate with ETags.
 
 ## API (v1)
 
 | Method | Path | Notes |
 |---|---|---|
+| GET | `/health` | Store kind and latency |
 | POST | `/auth/register`, `/auth/login`, `/auth/logout` | Bearer token |
 | GET | `/auth/me` | |
 | GET/POST | `/workspaces` | |
+| GET | `/workspaces/:id` | Members with email and role |
 | POST | `/workspaces/:id/members` | Invite an existing user by email (admin+) |
-| GET | `/templates` | |
+| GET | `/templates` | Five starter templates |
 | GET/POST | `/sites` | Create from `template` |
-| GET/PATCH/DELETE | `/sites/:id` | Full site (pages, sections, versions, domains) on GET |
+| GET/PATCH/DELETE | `/sites/:id` | Full editor payload on GET |
+| POST | `/sites/:id/duplicate` | Copies the draft to a new subdomain |
 | PUT | `/sites/:id/draft` | Autosave; 409 if the draft changed elsewhere |
-| POST | `/sites/:id/preview` | Draft HTML for one page (editor iframe) |
-| POST | `/sites/:id/publish` | 422 with a list of problems if invalid |
+| POST | `/sites/:id/preview` | Renders an unsaved draft for one page |
+| POST | `/sites/:id/publish` | `{note}`; 422 with a list of problems when invalid |
 | POST | `/sites/:id/unpublish` | |
-| GET | `/sites/:id/versions` | Included in `GET /sites/:id` |
 | POST | `/sites/:id/versions/:versionId/restore` | Rollback |
 | GET | `/sites/:id/submissions` | Contact-form inbox |
-| POST | `/sites/:id/domains`, `/domains/:id/verify` | DNS TXT verification |
-| POST | `/public/forms/:sectionId/submit` | Rate-limited; form-encoded posts redirect back |
+| PATCH/DELETE | `/sites/:id/submissions/:subId` | Mark read, delete |
+| POST | `/sites/:id/domains` | Returns the TXT record to add |
+| POST | `/domains/:id/verify`, DELETE `/domains/:id` | |
+| POST | `/public/forms/:sectionId/submit` | Rate-limited; form posts redirect back |
 | GET | `/admin/tenants` | Super admin (`ADMIN_EMAILS`) |
 
-## Plan coverage and known gaps
+## Known limits
 
-Implemented: multi-tenant workspaces and roles; sites from templates (3 starter
-templates, 5 theme presets); section library (hero, features, rich text, CTA,
-FAQ with JSON-LD, contact form, header, footer); page tree with per-page SEO,
-slugs, home page, and menu visibility; responsive visibility toggles; publish,
-version history and rollback; custom domains with TXT verification; contact
-form inbox; sitemap.xml and robots.txt; contrast warnings.
-
-Simplified or not yet done:
-
-- **Editor undo/redo** keeps whole-draft snapshots instead of Immer patches, and
-  autosave sends the full draft. Fine at MVP size; patches are the next step.
-- **Drag-and-drop** uses native HTML5 drag in the layers list (no dnd-kit yet).
-- **Responsive overrides** are limited to visibility per breakpoint; per-breakpoint
-  padding and alignment are stored in the data model but not editable in the UI.
-- **Images/media library, Tiptap rich text, Google Fonts picker, and stock search**
-  are not built; image sections take a URL.
-- **Form notifications** log to the console; wire Resend/SES in `server.js`.
-- **SSL for custom domains** is expected from the hosting layer (Vercel, Caddy or
-  Cloudflare for SaaS); the app only verifies ownership.
-- **Super admin UI** is API-only.
-- **Not deployed**: the plan's Next.js renderer, Redis cache, BullMQ jobs, and
-  Storybook/Playwright suites are replaced by the single Node process above.
-  The renderer can be split out later since `src/shared` has no server dependencies.
+- **Undo history** keeps whole-draft snapshots rather than patches. Fine for sites
+  of this size.
+- **Images** are added by URL. There is no media library or upload yet.
+- **Form notifications** are logged, not emailed. Wire Resend or SES in `server.js`.
+- **Custom-domain SSL** comes from the hosting layer (Vercel, Caddy, or Cloudflare
+  for SaaS). The app verifies ownership only.
+- **Responsive overrides** cover visibility per breakpoint. Per-breakpoint padding
+  is in the data model but not yet editable in the UI.
+- **Not yet built:** AI generation, commerce, blog or CMS collections, real-time
+  co-editing, and a super-admin UI (the admin API exists).
+- **Editor tests** use a headless browser. The smoke test is not in the repo yet.

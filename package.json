@@ -6,7 +6,7 @@
   "description": "Multi-tenant no-code website builder (editor, renderer, API)",
   "scripts": {
     "start": "node src/server/server.js",
-    "test": "node --test test/app.test.js"
+    "test": "node --test test/app.test.js test/features.test.js"
   },
   "engines": {
     "node": ">=20"
