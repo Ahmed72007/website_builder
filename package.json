@@ -1,0 +1,13 @@
+{
+  "name": "website-builder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Multi-tenant no-code website builder (editor, renderer, API)",
+  "scripts": {
+    "start": "node src/server/server.js",
+    "test": "node --test test/app.test.js"
+  },
+  "engines": { "node": ">=20" },
+  "optionalDependencies": { "mongodb": "^6.10.0" }
+}

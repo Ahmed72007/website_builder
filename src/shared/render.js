@@ -85,7 +85,7 @@ export function renderDocument(snapshot, { site, page, base = '', editor = false
   const ctx = (sectionId) => ({ nav, sectionId, base });
 
   const body = [
-    header && header.visibility?.desktop !== undefined && renderSection({ ...header, visibility: header.visibility }, ctx(header._id)),
+    header && renderSection(header, ctx(header._id)),
     `<main id="main">${sections.map((s) => renderSection(s, ctx(s._id))).join('\n')}</main>`,
     footer && renderSection(footer, ctx(footer._id)),
   ].filter(Boolean).join('\n');
