@@ -8,6 +8,10 @@
     "start": "node src/server/server.js",
     "test": "node --test test/app.test.js"
   },
-  "engines": { "node": ">=20" },
-  "optionalDependencies": { "mongodb": "^6.10.0" }
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "mongodb": "^6.10.0"
+  }
 }

@@ -494,7 +494,7 @@ export async function createApp({ dataFile = path.join(ROOT, 'data', 'db.json') 
   }
 
   // ----- request dispatcher -----
-  const server = http.createServer(async (req, res) => {
+  const handle = async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost');
       const pathname = url.pathname;
@@ -539,9 +539,10 @@ export async function createApp({ dataFile = path.join(ROOT, 'data', 'db.json') 
       console.error(err);
       send(res, 500, { error: 'Internal error' });
     }
-  });
+  };
 
-  return { server, store, close: async () => { server.close(); await store.close(); } };
+  const server = http.createServer(handle);
+  return { handle, server, store, close: async () => { server.close(); await store.close(); } };
 }
 
 // Run directly: `node src/server/server.js`
